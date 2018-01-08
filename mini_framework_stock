@@ -1,0 +1,265 @@
+import time
+import re
+import pymysql
+import urllib.parse
+
+# 字典存储
+#url_func_dict = {
+#    "/index.py": index,        
+#    "/center.py": center,        
+#    "/register.py": register,        
+#    "/login.py": login,
+#    "/unregister.py": unregister
+#}
+
+url_func_dict = dict()
+def route(url):
+    def set_func(func):
+        url_func_dict[url] = func # 向字典中添加一个key-vlue,key是url, value是函数引用
+        def call_func(*args, **kwargs):
+            return func(*args, **kwargs)
+        return call_func
+    return set_func
+
+@route(r"/index\.html")
+def index(ret):
+    # 1.打开对应的模板文件
+    # open在不指定打开方式时，默认为r
+    with open("./templates/index.html") as f:
+        html_content = f.read()
+
+    # 2.查询数据库
+    cnn = pymysql.connect(host='localhost',port=3306,user='root',password='mysql',database='stock_db',charset='utf8')
+    cursor = cnn.cursor()
+    sql = """select * from info;"""
+    cursor.execute(sql)
+    data_from_mysql = cursor.fetchall()
+    cursor.close()
+    cnn.close()
+
+    # 3.替换模板数据
+    line_html = """
+                <tr>
+                    <td>%s</td>
+                    <td>%s</td>
+                    <td>%s</td>
+                    <td>%s</td>
+                    <td>%s</td>
+                    <td>%s</td>
+                    <td>%s</td>
+                    <td>%s</td>
+                    <td>
+                        <input type="button" value="添加" id="toAdd" name="toAdd" systemidvaule="%s">
+                    </td>
+                </tr>
+    """
+    code_html = ""
+    for temp in data_from_mysql:
+        code_html += line_html % (temp[0], temp[1], temp[2], temp[3], temp[4], temp[5], temp[6], temp[7], temp[1])
+
+    html_content = re.sub(r"\{%content%\}", code_html, html_content)
+
+    # 4.返回模板数据
+    return html_content
+
+@route(r"/center\.html")
+def center(ret):
+    # 1.打开对应的模板文件
+    with open("./templates/center.html") as f:
+        html_content = f.read()
+
+    # 2.查询数据库
+    cnn = pymysql.connect(host='localhost',port=3306,user='root',password='mysql',database='stock_db',charset='utf8')
+    cursor = cnn.cursor()
+    sql = """select i.code,i.short,i.chg,i.turnover,i.price,i.highs,f.note_info from info as i inner join focus as f on i.id=f.info_id;"""
+    cursor.execute(sql)
+    data_from_mysql = cursor.fetchall()
+    cursor.close()
+    cnn.close()
+
+    # 3.替换数据
+    line_html = """
+                <tr>
+                    <td>%s</td>
+                    <td>%s</td>
+                    <td>%s</td>
+                    <td>%s</td>
+                    <td>%s</td>
+                    <td>%s</td>
+                    <td>%s</td>
+                    <td>
+                    <a type="button" class="btn btn-default btn-xs" href="/update/%s.html"> <span class="glyphicon glyphicon-star" aria-hidden="true"></span> 修改 </a>
+                    </td>
+                    <td>
+                    <input type="button" value="删除" id="toDel" name="toDel" systemidvaule="%s">
+                    </td>
+                </tr>
+    """
+    
+    code_html = ""
+    for temp in data_from_mysql:
+        code_html += line_html % (temp[0], temp[1], temp[2], temp[3], temp[4], temp[5], temp[6], temp[0], temp[0])
+    
+    html_content = re.sub(r"\{%content\%}", code_html, html_content)
+    # 3.返回模板数据
+    return html_content
+
+@route(r"/register\.html")
+def register(ret):
+    return "-----注册页面-----当前时间为：%s" % time.ctime()
+
+
+# /add/000007.html
+@route(r"^/add/(\d+)\.html$")
+def add_focus(ret):
+
+    # 关注的哪支股票
+    stock_code = ret.group(1)
+    #　链接到数据库
+    cnn = pymysql.connect(host='localhost', port=3306, user='root', password='mysql', database='stock_db', charset='utf8')
+    cursor = cnn.cursor()
+    # 判断是否存在这支股票
+    sql = """select * from info where code=%s;"""
+    cursor.execute(sql, [stock_code])
+    data_from_mysql = cursor.fetchall()
+    if not data_from_mysql:
+        cursor.close()
+        cnn.close()
+        return "不存在这支股票"
+
+    # 判断之前是否关注过这支股票
+    sql = """select * from info as i inner join focus as f on i.id = f.info_id where i.code=%s;"""
+    cursor.execute(sql, [stock_code])
+    data_from_mysql = cursor.fetchall()
+    if data_from_mysql:
+        cursor.close()
+        cnn.close()
+        return "请勿重复关注"
+
+    # 插入数据
+    sql = """insert into focus (info_id) select id from info where code=%s;"""
+    cursor.execute(sql, [stock_code])
+    cnn.commit()
+    cursor.close()
+    cnn.close()
+    return  "成功添加关注！"
+
+
+@route(r"^/del/(\d+)\.html$")
+def del_focus(ret):
+    # 提取要删除的股票
+    stock_code = ret.group(1)
+
+    # 从数据库中删除
+    cnn = pymysql.connect(host='localhost', port=3306, user='root', password='mysql', database='stock_db',
+                          charset='utf8')
+    cursor = cnn.cursor()
+    # 判断是否有这支股票
+    sql = """select * from info where code=%s;"""
+    cursor.execute(sql, [stock_code])
+    data_from_mysql = cursor.fetchall()
+    if not data_from_mysql:
+        cursor.close()
+        cnn.close()
+        return "不存在这支股票"
+    # 判断之前是否关注过这支股票
+    sql = """select * from info as i inner join focus as f on i.id=f.info_id where i.code=%s;"""
+    cursor.execute(sql, [stock_code])
+    data_from_mysql = cursor.fetchall()
+    if  not data_from_mysql:
+        cursor.close()
+        cnn.close()
+        return "未关注该股票，请先关注！"
+
+    # 删除数据
+    sql = """delete from focus where info_id = (select id from info where code = %s);"""
+    cursor.execute(sql, [stock_code])
+    cnn.commit()
+    cursor.close()
+    cnn.close()
+    return  "成功取消对该支股票的关注！"
+
+
+@route(r"^/update/(\d+)\.html$")
+def show_page_info(ret):
+
+    # 提取股票信息
+    stock_code = ret.group(1)
+    # 读取模板数据
+    with open("./templates/update.html") as f:
+        html_data = f.read()
+
+    # 从数据库查询数据
+    cnn = pymysql.connect(host='localhost', port=3306, user='root', password='mysql', database='stock_db',
+                          charset='utf8')
+    cursor = cnn.cursor()
+
+    sql = """select note_info from focus where info_id =(select id from info where code=%s);"""
+    cursor.execute(sql, [stock_code])
+    data_from_mysql = cursor.fetchone() # 为啥用fetchone
+    # 替换数据
+    html_data = re.sub(r"\{%note_info%\}", data_from_mysql[0], html_data) # 为啥需要加[0]
+    html_data = re.sub(r"\{%code%\}", stock_code, html_data)
+    # 返回数据
+    return html_data
+
+@route(r"/update/(\d+)/(.*)\.html")
+def save_page_info(ret):
+    # 提取股票
+    # 提取备注
+    stock_code = ret.group(1)
+
+    note_info = urllib.parse.unquote(ret.group(2))
+
+    # 修改数据
+    conn = pymysql.connect(host='localhost',port=3306,user='root',password='mysql',database='stock_db',charset='utf8')
+    cursor = conn.cursor()
+    sql = """update focus as f inner join info as i on i.id=f.info_id set f.note_info=%s where i.code=%s;"""
+    cursor.execute(sql, [note_info, stock_code])
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+    return "修改备注成功..."
+
+
+def application(env, set_header):
+    # 调用set_header函数 将response_body传递过去
+    status = "200 OK"
+    response_headers = [("Content-Type", "text/html; charset=utf-8")]
+    set_header(status, response_headers)
+
+    path_info = env["PATH_INFO"]
+    try:
+        """
+        func = url_func_dict[path_info]
+        response_body = func()
+        """
+        # for 循环　的r_url是原字符串,fun 是指向正则表达式匹配时　的函数
+        for r_url, func in url_func_dict.items():
+            ret = re.match(r_url, path_info)
+            if ret:
+                response_body = func(ret)
+                break
+        else:
+            response_body = "不存在该url"
+
+    except Exception as e:
+        response_body = "该页面不存在mini"
+
+
+
+
+    """
+    if path_info == "/index.py":
+        response_body = index()
+    elif path_info == "/center.py":
+        response_body = center()
+    elif path_info == "/register.py":
+        response_body = register()
+    else:
+        response_body = "该页面不存在。。。"
+    """
+    # 返回对应页面的body信息
+    # response_body = "hhhhhhhh"
+    return response_body
